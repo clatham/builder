@@ -296,7 +296,7 @@ print_usage()
     echo -e "        Sets the vcpkg directory to DIR (default=vcpkg)."
     echo -e "    --vcpkg-triplet TRIPLET"
     echo -e "        Sets the vcpkg triplet to TRIPLET (default=<architecture>-<os>)."
-
+    
     exit 1
 }
 
@@ -337,7 +337,7 @@ BUILDER_VCPKG_TRIPLET="$(builder_get_vcpkg_triplet)"
 
 BUILDER_PERFORM_DIAG=0
 BUILDER_PERFORM_VCPKG=1
-BUILDER_PERFORM_REBUILD=0
+BUILDER_PERFORM_CLEAN=0
 BUILDER_PERFORM_BUILD=1
 BUILDER_PERFORM_TEST=0
 BUILDER_PERFORM_PACKAGE=0
@@ -410,7 +410,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         
         -r | --rebuild)
-            BUILDER_PERFORM_REBUILD=1
+            BUILDER_PERFORM_CLEAN=1
             shift 1
             ;;
         
@@ -500,25 +500,34 @@ fi
 if [ $BUILDER_THREAD_COUNT -lt 1 ]; then
     
     echo -e ""
-    echo -e "BUILDER [${BRIGHT_YELLOW}warning${RESET}] thread count cannot be less than one -- setting it to one"
+    echo -e "BUILDER [${YELLOW}warning${RESET}] thread count cannot be less than one -- setting it to one"
     
     BUILDER_THREAD_COUNT=1
     
 fi
 
-if [ ! -d "$BUILDER_VCPKG_DIR" ]; then
+if (( BUILDER_PERFORM_VCPKG ))  &&  [ ! -d "$BUILDER_VCPKG_DIR" ]; then
     
     echo -e ""
-    echo -e "BUILDER [${BRIGHT_YELLOW}warning${RESET}] vcpkg directory does not exist -- vcpkg will be disabled"
+    echo -e "BUILDER [${YELLOW}warning${RESET}] vcpkg directory does not exist -- vcpkg will be disabled"
     
     BUILDER_PERFORM_VCPKG=0
+    
+fi
+
+if (( BUILDER_PERFORM_CLEAN ))  &&  [ ! -d "$BUILDER_BUILD_DIR" ]; then
+    
+    echo -e ""
+    echo -e "BUILDER [${YELLOW}warning${RESET}] cleaning is enabled, but the build directory does not exist -- cleaning will be disabled"
+    
+    BUILDER_PERFORM_CLEAN=0
     
 fi
 
 if (( BUILDER_PERFORM_PACKAGE ))  &&  (( ! $BUILDER_PERFORM_BUILD ))  &&  [ ! -f "$BUILDER_BUILD_DIR/CMakeCache.txt" ]; then
     
     echo -e ""
-    echo -e "BUILDER [${BRIGHT_YELLOW}warning${RESET}] building is disabled, and there is no build system -- packaging will be disabled"
+    echo -e "BUILDER [${YELLOW}warning${RESET}] building is disabled, and there is no build system -- packaging will be disabled"
     
     BUILDER_PERFORM_PACKAGE=0
     
@@ -540,7 +549,7 @@ if (( BUILDER_PERFORM_VCPKG )); then
     (( ++BUILDER_STEP_COUNT ))
 fi
 
-if (( BUILDER_PERFORM_REBUILD )); then
+if (( BUILDER_PERFORM_CLEAN )); then
     (( ++BUILDER_STEP_COUNT ))
 fi
 
@@ -610,6 +619,23 @@ fi
 
 
 #
+#  if requested, remove the build directory contents
+#
+
+if (( BUILDER_PERFORM_CLEAN )); then
+    
+    echo -e ""
+    echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] cleaning existing build..."
+    
+    rm -rf "$BUILDER_BUILD_DIR"/*
+    
+    echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] cleaning existing build...done!"
+    (( ++BUILDER_STEP ))
+    
+fi
+
+
+#
 #  if requested, build the project
 #
 
@@ -618,19 +644,6 @@ if (( BUILDER_PERFORM_BUILD )); then
     #  create the build directory, if required
     if [ ! -d "$BUILDER_BUILD_DIR" ]; then
         mkdir -p "$BUILDER_BUILD_DIR"
-    fi
-    
-    #  if requested, remove the build directory contents
-    if (( BUILDER_PERFORM_REBUILD )); then
-        
-        echo -e ""
-        echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] removing existing build..."
-        
-        rm -rf "$BUILDER_BUILD_DIR"/*
-        
-        echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] removing existing build...done!"
-        (( ++BUILDER_STEP ))
-        
     fi
     
     echo -e ""

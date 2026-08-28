@@ -51,9 +51,9 @@ BUILDER can perform the following operations, depending upon configuration:
     BUILDER will optionally collect and display the name and values of all
     functions and environment variables to help you diagnose any build issues.
 
-- VCPKG
+- Dependencies
 
-    BUILDER will optionally install dependencies by invoking VCPKG from the
+    BUILDER will optionally install dependencies by invoking vcpkg from the
     `BUILDER_VCPKG_DIR` directory.
 
 - Rebuild
@@ -120,7 +120,7 @@ BUILDER:
 
 - --no-vcpkg
 
-    Disables installation of packages with VCPKG.
+    Disables installation of packages with vcpkg.
 
 - -p, --package
 
@@ -140,11 +140,11 @@ BUILDER:
 
 - --vcpkg-dir `DIR`
 
-    Sets the VCPKG directory to `DIR` (default=`"vcpkg"`).
+    Sets the vcpkg directory to `DIR` (default=`"vcpkg"`).
 
 - --vcpkg-triplet `TRIPLET`
 
-    Sets the VCPKG triplet to `TRIPLET` (default=`<architecture>-<os>`).
+    Sets the vcpkg triplet to `TRIPLET` (default=`<architecture>-<os>`).
 
 
 ## Config File
