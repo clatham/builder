@@ -23,7 +23,7 @@ for %%R in ("C:\Program Files", "C:\Program Files (x86)") do (
     for %%V in (%VERSIONS%) do (
         for %%E in (%EDITIONS%) do (
             set "TEST_PATH=%%~R\Microsoft Visual Studio\%%V\%%E\VC\Auxiliary\Build\vcvarsall.bat"
-
+            
             if exist "!TEST_PATH!" (
                 set "VCVARSALL_PATH=!TEST_PATH!"
                 goto :found_vcvars
@@ -55,6 +55,27 @@ if %ERRORLEVEL% NEQ 0 (
 
 
 rem
+rem  search for a BASH installation
+rem
+
+set "BASH_PATH_LIST="%ProgramFiles%\Git\bin\bash.exe" "%LocalAppData%\Programs\Git\bin\bash.exe" "%ProgramFiles(x86)%\Git\bin\bash.exe" "C:\msys64\usr\bin\bash.exe" "C:\cygwin64\bin\bash.exe" "C:\msys32\usr\bin\bash.exe" "C:\cygwin\bin\bash.exe""
+set "BASH_PATH="
+
+for %%P in (%BASH_PATH_LIST%) do (
+    if exist %%P (
+        set "BASH_PATH=%%~P"
+        goto :found_bash
+    )
+)
+
+echo.
+echo BUILDER [error] could not find an installation of BASH
+exit /b 1
+
+:found_bash
+
+
+rem
 rem  determine the script directory
 rem
 
@@ -65,7 +86,7 @@ rem
 rem  invoke the builder script in git-bash
 rem
 
-"C:\Program Files\Git\bin\bash.exe" --login -c "%SCRIPT_DIR:\=/%/builder.sh %*"
+"%BASH_PATH%" --login -c "%SCRIPT_DIR:\=/%/builder.sh %*"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

@@ -1,14 +1,6 @@
 #!/bin/bash
 
 
-#  setup ANSI/VT100 color codes
-
-BLUE="\e[36m"
-GREEN="\e[32m"
-RED="\e[91m"
-RESET="\e[0m"
-
-
 #
 #  report error, and exits with code from $?
 #  argument: $LINENO
@@ -239,6 +231,30 @@ builder_get_cmake_generator()
 
 
 #
+#  get vcpkg triplet
+#
+
+builder_get_vcpkg_triplet()
+{
+    case "$(uname -s)" in
+        
+        CYGWIN* | MINGW* | MSYS*)
+            echo "$(builder_get_cmake_architecture)-windows"
+            ;;
+        
+        Linux*)
+            echo "$(builder_get_cmake_architecture)-linux"
+            ;;
+        
+        *)
+            builder_exit_with_message "unsupported operating system: $(uname -s)"
+            ;;
+        
+    esac
+}
+
+
+#
 #  prints the usage, and exits
 #
 
@@ -250,7 +266,7 @@ print_usage()
     echo -e "    builder --help"
     echo -e ""
     echo -e "Options:"
-    echo -e "    -b, --build-dir DIR"
+    echo -e "    --build-dir DIR"
     echo -e "        Sets the output directory to DIR (default=build)."
     echo -e "    -c, --config CONFIG"
     echo -e "        Sets the build configuration to CONFIG (default=Debug)."
@@ -258,20 +274,28 @@ print_usage()
     echo -e "        Prints the value of important functions and all variables."
     echo -e "    -h, -?, --help"
     echo -e "        Prints this usage, and exits."
-    echo -e "    -i, --install-dir DIR"
+    echo -e "    --install-dir DIR"
     echo -e "        Sets the install directory to DIR (default=install)."
-    echo -e "    -j, --threads COUNT"
+    echo -e "    -j, --thread-count COUNT"
     echo -e "        Sets the number of threads to COUNT (default=80% of max)."
     echo -e "    -n, --no-build"
     echo -e "        Disables building of the project."
+    echo -e "    --no-color"
+    echo -e "        Disables ANSI/VT-100 color in text output."
+    echo -e "    --no-vcpkg"
+    echo -e "        Disables installation of packages with vcpkg."
     echo -e "    -p, --package"
     echo -e "        Packages the project."
     echo -e "    -r, --rebuild"
     echo -e "        Rebuilds the project."
     echo -e "    -t, --test"
     echo -e "        Tests the project."
-    echo -e "    -u, --test-dir DIR"
+    echo -e "    --test-dir DIR"
     echo -e "        Sets the test directory to DIR (default=tests)."
+    echo -e "    --vcpkg-dir DIR"
+    echo -e "        Sets the vcpkg directory to DIR (default=vcpkg)."
+    echo -e "    --vcpkg-triplet TRIPLET"
+    echo -e "        Sets the vcpkg triplet to TRIPLET (default=<architecture>-<os>)."
 
     exit 1
 }
@@ -289,30 +313,34 @@ set -E  # ensure functions inherit the ERR trap
 trap builder_exit_on_error ERR
 
 
-echo -e ""
-echo -e "BUILDER CMake Build Tool"
-echo -e "Copyright (C) 2026 C. Latham.  All rights reserved."
-
-
 #
 #  set up default configuration variables
 #
 
 BUILDER_BUILD_CONFIG=Debug
-BUILDER_BUILD_DIR_DEBUG=debug
-BUILDER_BUILD_DIR_RELEASE=release
-BUILDER_INSTALL_DIR=install
-BUILDER_TEST_DIR=tests
+BUILDER_BUILD_DIR_DEBUG="debug"
+BUILDER_BUILD_DIR_RELEASE="release"
 
 BUILDER_CMAKE_TOOL="cmake"
 
-BUILDER_PERFORM_BUILD=1
-BUILDER_PERFORM_DIAG=0
-BUILDER_PERFORM_REBUILD=0
-BUILDER_PERFORM_PACKAGE=0
-BUILDER_PERFORM_TEST=0
+BUILDER_COLORED_TEXT=1
+
+BUILDER_INSTALL_DIR="install"
+
+BUILDER_TEST_DIR="tests"
 
 BUILDER_THREAD_COUNT=$(( $(nproc) * 8 / 10 ))
+
+BUILDER_VCPKG_DIR="vcpkg"
+BUILDER_VCPKG_FLAGS=
+BUILDER_VCPKG_TRIPLET="$(builder_get_vcpkg_triplet)"
+
+BUILDER_PERFORM_DIAG=0
+BUILDER_PERFORM_VCPKG=1
+BUILDER_PERFORM_REBUILD=0
+BUILDER_PERFORM_BUILD=1
+BUILDER_PERFORM_TEST=0
+BUILDER_PERFORM_PACKAGE=0
 
 
 #
@@ -331,7 +359,7 @@ fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         
-        -b | --build-dir)
+        --build-dir)
             BUILDER_BUILD_DIR=$2
             shift 2
             ;;
@@ -351,18 +379,28 @@ while [[ $# -gt 0 ]]; do
             shift 1
             ;;
         
-        -i | --install-dir)
+        --install-dir)
             BUILDER_INSTALL_DIR=$2
             shift 2
             ;;
         
-        -j | --threads)
+        -j | --thread-count)
             BUILDER_THREAD_COUNT=$2
             shift 2
             ;;
         
         -n | --no-build)
             BUILDER_PERFORM_BUILD=0
+            shift 1
+            ;;
+        
+        --no-color)
+            BUILDER_COLORED_TEXT=0
+            shift 1
+            ;;
+        
+        --no-vcpkg)
+            BUILDER_PERFORM_VCPKG=0
             shift 1
             ;;
         
@@ -381,8 +419,18 @@ while [[ $# -gt 0 ]]; do
             shift 1
             ;;
         
-        -u | --test-dir)
+        --test-dir)
             BUILDER_TEST_DIR=$2
+            shift 2
+            ;;
+        
+        --vcpkg-dir)
+            BUILDER_VCPKG_DIR=$2
+            shift 2
+            ;;
+        
+        --vcpkg-triplet)
+            BUILDER_VCPKG_TRIPLET=$2
             shift 2
             ;;
         
@@ -396,6 +444,52 @@ done
 
 
 #
+#  if our output is a terminal, colored text is enabled, and more than eight
+#  colors are supported, then setup the ANSI/VT-100 color codes
+#
+
+if [ -t 1 ]  &&  (( BUILDER_COLORED_TEXT )); then
+    
+    NUM_COLORS=$(tput colors 2>/dev/null)
+
+    if [ "$NUM_COLORS" -ge 8 ]; then
+        
+        #  setup ANSI/VT100 codes
+        
+        BLACK="\e[30m"
+        RED="\e[31m"
+        GREEN="\e[32m"
+        YELLOW="\e[33m"
+        BLUE="\e[34m"
+        MAGENTA="\e[35m"
+        CYAN="\e[36m"
+        WHITE="\e[37m"
+        
+        BRIGHT_BLACK="\e[90m"
+        BRIGHT_RED="\e[91m"
+        BRIGHT_GREEN="\e[92m"
+        BRIGHT_YELLOW="\e[93m"
+        BRIGHT_BLUE="\e[94m"
+        BRIGHT_MAGENTA="\e[95m"
+        BRIGHT_CYAN="\e[96m"
+        BRIGHT_WHITE="\e[97m"
+        
+        RESET="\e[0m"
+        
+    fi
+fi
+
+
+#
+#  display banner
+#
+
+echo -e ""
+echo -e "${GREEN}BUILDER Build Tool${RESET}"
+echo -e "Copyright (c) 2026 C. Latham.  All rights reserved."
+
+
+#
 #  set up working variables now, so they cannot be overidden
 #
 
@@ -404,7 +498,30 @@ if [ -z "$BUILDER_BUILD_DIR" ]; then
 fi
 
 if [ $BUILDER_THREAD_COUNT -lt 1 ]; then
+    
+    echo -e ""
+    echo -e "BUILDER [${BRIGHT_YELLOW}warning${RESET}] thread count cannot be less than one -- setting it to one"
+    
     BUILDER_THREAD_COUNT=1
+    
+fi
+
+if [ ! -d "$BUILDER_VCPKG_DIR" ]; then
+    
+    echo -e ""
+    echo -e "BUILDER [${BRIGHT_YELLOW}warning${RESET}] vcpkg directory does not exist -- vcpkg will be disabled"
+    
+    BUILDER_PERFORM_VCPKG=0
+    
+fi
+
+if (( BUILDER_PERFORM_PACKAGE ))  &&  (( ! $BUILDER_PERFORM_BUILD ))  &&  [ ! -f "$BUILDER_BUILD_DIR/CMakeCache.txt" ]; then
+    
+    echo -e ""
+    echo -e "BUILDER [${BRIGHT_YELLOW}warning${RESET}] building is disabled, and there is no build system -- packaging will be disabled"
+    
+    BUILDER_PERFORM_PACKAGE=0
+    
 fi
 
 
@@ -416,6 +533,10 @@ BUILDER_STEP_COUNT=0
 BUILDER_STEP=1
 
 if (( BUILDER_PERFORM_DIAG )); then
+    (( ++BUILDER_STEP_COUNT ))
+fi
+
+if (( BUILDER_PERFORM_VCPKG )); then
     (( ++BUILDER_STEP_COUNT ))
 fi
 
@@ -456,6 +577,33 @@ if (( BUILDER_PERFORM_DIAG )); then
     done
     
     echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] collecting diagnostics...done!"
+    (( ++BUILDER_STEP ))
+    
+fi
+
+
+#
+#  if requested, pull dependencies with vcpkg
+#
+
+if (( BUILDER_PERFORM_VCPKG )); then
+    
+    echo -e ""
+    echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] installing dependencies..."
+    
+    if ! command -v "$BUILDER_VCPKG_DIR/vcpkg" &> /dev/null; then
+        
+        if [ "$(builder_get_os)" == "win" ]; then
+            cmd.exe //c "call $BUILDER_VCPKG_DIR\\bootstrap-vcpkg.bat -disableMetrics"
+        else
+            source "$BUILDER_VCPKG_DIR/bootstrap-vcpkg.sh -disableMetrics"
+        fi
+        
+    fi
+    
+    "$BUILDER_VCPKG_DIR/vcpkg" install --triplet="$BUILDER_VCPKG_TRIPLET" --vcpkg-root="$(pwd)/$BUILDER_VCPKG_DIR" $BUILDER_VCPKG_FLAGS
+    
+    echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] installing dependencies...done!"
     (( ++BUILDER_STEP ))
     
 fi
@@ -510,10 +658,8 @@ if (( BUILDER_PERFORM_TEST )); then
     echo -e ""
     echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] running test suite..."
     
-    find "$BUILDER_BUILD_DIR/$BUILDER_TEST_DIR" -type f -print0 | while read -r -d '' file; do
-        if file "$file" | grep -q "executable"; then
-            "$file"
-        fi
+    find "$BUILDER_BUILD_DIR/$BUILDER_TEST_DIR" -type f -executable -print0 \( -iname "*.exe" -o ! -name "*.*" \) | while read -r -d '' file; do
+        echo "$file"
     done
     
     echo -e "BUILDER [${GREEN}${BUILDER_STEP}/${BUILDER_STEP_COUNT}${RESET}] running test suite...done!"
