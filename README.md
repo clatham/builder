@@ -207,7 +207,7 @@ be provided in the configuration file:
 
     Enables the installing of dependencies with vcpkg (default=`1`).
 
-- BUILDER_PERFORM_REBUILD
+- BUILDER_PERFORM_CLEAN
 
     Enables the removal and regeneration of the build system (default=`0`).
 
